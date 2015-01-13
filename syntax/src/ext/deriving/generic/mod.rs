@@ -455,6 +455,11 @@ impl<'a> TraitDef<'a> {
                                                   type_ident, generics))
                 }).collect();
 
+            // also add in any bounds from the declaration
+            for declared_bound in ty_param.bounds.iter() {
+                bounds.push((*declared_bound).clone());
+            }
+
             cx.typaram(self.span,
                        ty_param.ident,
                        OwnedSlice::from_vec(bounds),
@@ -465,22 +470,7 @@ impl<'a> TraitDef<'a> {
         where_clause.predicates.extend(generics.where_clause.predicates.iter().map(|clause| {
             match *clause {
                 ast::WherePredicate::BoundPredicate(ref wb) => {
-                    /*
-                    let mut bounds: Vec<_> = self.additional_bounds.iter().map(|p| {
-                        cx.typarambound(p.to_path(cx, self.span,
-                                                      type_ident, generics))
-                    }).collect();
-
-                    // require the current trait
-                    bounds.push(cx.typarambound(trait_path.clone()));
-
-                    // also add in any bounds from the declaration
-                    for declared_bound in wb.bounds.iter() {
-                        bounds.push(declared_bound.clone());
-                    }
-                    */
-
-                    // also add in any bounds from the declaration
+                    // add in any bounds from the declaration
                     let bounds: Vec<_> = wb.bounds.iter()
                         .map(|declared_bound| declared_bound.clone())
                         .collect();
@@ -509,12 +499,14 @@ impl<'a> TraitDef<'a> {
             }
         }));
 
+        /*
         if !ty_params.is_empty() {
             let ty_param_idents: Vec<Ident> = ty_params.iter()
                 .map(|ty_param| ty_param.ident)
                 .collect();
 
             // we need to handle constraining any uses of associated types.
+            /*
             for field_ty in field_tys.into_iter() {
                 if contains_associated_type(&*field_ty, ty_param_idents.as_slice()) {
                     let mut bounds: Vec<_> = self.additional_bounds.iter().map(|p| {
@@ -525,25 +517,19 @@ impl<'a> TraitDef<'a> {
                     // require the current trait
                     bounds.push(cx.typarambound(trait_path.clone()));
 
-                    // also add in any bounds from the declaration
-                    /*
-                    for declared_bound in wb.bounds.iter() {
-                        bounds.push(declared_bound.clone());
-                    }
-                    */
-
                     let predicate = ast::WhereBoundPredicate {
                         span: self.span,
                         bounded_ty: field_ty,
                         bounds: OwnedSlice::from_vec(bounds),
-                        //OwnedSlice::from_vec(vec![cx.typarambound(trait_path.clone())]),
                     };
 
                     let predicate = ast::WherePredicate::BoundPredicate(predicate);
                     where_clause.predicates.push(predicate);
                 }
             }
+            */
         }
+        */
 
         let trait_generics = Generics {
             lifetimes: lifetimes,
@@ -600,9 +586,12 @@ impl<'a> TraitDef<'a> {
                          struct_def: &StructDef,
                          type_ident: Ident,
                          generics: &Generics) -> P<ast::Item> {
+        let field_tys = Vec::new();
+                             /*
         let field_tys: Vec<P<ast::Ty>> = struct_def.fields.iter()
             .map(|field| field.node.ty.clone())
             .collect();
+            */
 
         let methods = self.methods.iter().map(|method_def| {
             let (explicit_self, self_args, nonself_args, tys) =
@@ -644,7 +633,22 @@ impl<'a> TraitDef<'a> {
                        enum_def: &EnumDef,
                        type_ident: Ident,
                        generics: &Generics) -> P<ast::Item> {
-        let field_tys = Vec::new();
+        let mut field_tys = Vec::new();
+
+        /*
+        for variant in enum_def.variants.iter() {
+            match variant.node.kind {
+                ast::VariantKind::TupleVariantKind(ref args) => {
+                    field_tys.extend(args.iter()
+                        .map(|arg| arg.ty.clone()));
+                }
+                ast::VariantKind::StructVariantKind(ref args) => {
+                    field_tys.extend(args.fields.iter()
+                        .map(|field| field.node.ty.clone()));
+                }
+            }
+        }
+        */
 
         let methods = self.methods.iter().map(|method_def| {
             let (explicit_self, self_args, nonself_args, tys) =
