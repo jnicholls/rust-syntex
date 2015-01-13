@@ -1,3 +1,14 @@
+pub mod foo {
+    pub type I = int;
+}
+
+#[derive(Copy)]
+struct Peekable<I> where I: Iterator {
+    iter: I,
+    foo: Option<foo::I>,
+    next: Option<<I as Iterator>::Item>,
+}
+
 pub fn hello_world() -> u8 {
     my_syntax!()
 }

@@ -327,6 +327,39 @@ pub fn combine_substructure<'a>(f: CombineSubstructureFunc<'a>)
     RefCell::new(f)
 }
 
+fn contains_associated_type(ty: &ast::Ty, ty_param_idents: &[Ident]) -> bool {
+    use visit;
+
+    struct Visitor<'a> {
+        found: bool,
+        ty_param_idents: &'a [Ident],
+    }
+
+    impl<'a> visit::Visitor<'a> for Visitor<'a> {
+        fn visit_path(&mut self, path: &'a ast::Path, _id: ast::NodeId) {
+            match path.segments.first() {
+                Some(segment) => {
+                    if self.ty_param_idents.contains(&segment.identifier) {
+                        self.found = true;
+                        return;
+                    }
+                }
+                None => {}
+            }
+
+            visit::walk_path(self, path);
+        }
+    }
+
+    let mut visitor = Visitor {
+        found: false,
+        ty_param_idents: ty_param_idents,
+    };
+
+    visit::walk_ty(&mut visitor, ty);
+
+    visitor.found
+}
 
 impl<'a> TraitDef<'a> {
     pub fn expand<F>(&self,
@@ -369,18 +402,38 @@ impl<'a> TraitDef<'a> {
         }))
     }
 
-    /// Given that we are deriving a trait `Tr` for a type `T<'a, ...,
-    /// 'z, A, ..., Z>`, creates an impl like:
+    /// Given that we are deriving a trait `DerivedTrait` for a type like:
     ///
     /// ```ignore
-    /// impl<'a, ..., 'z, A:Tr B1 B2, ..., Z: Tr B1 B2> Tr for T<A, ..., Z> { ... }
+    /// struct Struct<'a, ..., 'z, A, B: Trait, C, ...> where C: WhereTrait {
+    ///     a: A,
+    ///     b: B::Item,
+    ///     c: <B as Trait3>::Item,
+    ///     ...
+    /// }
     /// ```
     ///
-    /// where B1, B2, ... are the bounds given by `bounds_paths`.'
+    /// create an impl like:
+    ///
+    /// ```ignore
+    /// impl<'a, ..., 'z, A, B: Trait, C, ...> where
+    ///     A:                       DerivedTrait + B1 + ... + BN,
+    ///     B:                       DerivedTrait + B1 + ... + BN,
+    ///     C:                       WhereTrait + DerivedTrait + B1 + ... + BN,
+    ///     B::Item:                 DerivedTrait + B1 + ... + BN,
+    ///     <C as WhereTrait>::Item: DerivedTrait + B1 + ... + BN,
+    ///     ...
+    /// {
+    ///     ...
+    /// }
+    /// ```
+    ///
+    /// where B1, ..., BN are the bounds given by `bounds_paths`.'
     fn create_derived_impl(&self,
                            cx: &mut ExtCtxt,
                            type_ident: Ident,
                            generics: &Generics,
+                           field_tys: Vec<P<ast::Ty>>,
                            methods: Vec<P<ast::Method>>) -> P<ast::Item> {
         let trait_path = self.path.to_path(cx, self.span, type_ident, generics);
 
@@ -402,14 +455,6 @@ impl<'a> TraitDef<'a> {
                                                   type_ident, generics))
                 }).collect();
 
-            // require the current trait
-            bounds.push(cx.typarambound(trait_path.clone()));
-
-            // also add in any bounds from the declaration
-            for declared_bound in ty_param.bounds.iter() {
-                bounds.push((*declared_bound).clone());
-            }
-
             cx.typaram(self.span,
                        ty_param.ident,
                        OwnedSlice::from_vec(bounds),
@@ -420,10 +465,30 @@ impl<'a> TraitDef<'a> {
         where_clause.predicates.extend(generics.where_clause.predicates.iter().map(|clause| {
             match *clause {
                 ast::WherePredicate::BoundPredicate(ref wb) => {
+                    /*
+                    let mut bounds: Vec<_> = self.additional_bounds.iter().map(|p| {
+                        cx.typarambound(p.to_path(cx, self.span,
+                                                      type_ident, generics))
+                    }).collect();
+
+                    // require the current trait
+                    bounds.push(cx.typarambound(trait_path.clone()));
+
+                    // also add in any bounds from the declaration
+                    for declared_bound in wb.bounds.iter() {
+                        bounds.push(declared_bound.clone());
+                    }
+                    */
+
+                    // also add in any bounds from the declaration
+                    let bounds: Vec<_> = wb.bounds.iter()
+                        .map(|declared_bound| declared_bound.clone())
+                        .collect();
+
                     ast::WherePredicate::BoundPredicate(ast::WhereBoundPredicate {
                         span: self.span,
                         bounded_ty: wb.bounded_ty.clone(),
-                        bounds: OwnedSlice::from_vec(wb.bounds.iter().map(|b| b.clone()).collect())
+                        bounds: OwnedSlice::from_vec(bounds),
                     })
                 }
                 ast::WherePredicate::RegionPredicate(ref rb) => {
@@ -443,6 +508,42 @@ impl<'a> TraitDef<'a> {
                 }
             }
         }));
+
+        if !ty_params.is_empty() {
+            let ty_param_idents: Vec<Ident> = ty_params.iter()
+                .map(|ty_param| ty_param.ident)
+                .collect();
+
+            // we need to handle constraining any uses of associated types.
+            for field_ty in field_tys.into_iter() {
+                if contains_associated_type(&*field_ty, ty_param_idents.as_slice()) {
+                    let mut bounds: Vec<_> = self.additional_bounds.iter().map(|p| {
+                        cx.typarambound(p.to_path(cx, self.span,
+                                                      type_ident, generics))
+                    }).collect();
+
+                    // require the current trait
+                    bounds.push(cx.typarambound(trait_path.clone()));
+
+                    // also add in any bounds from the declaration
+                    /*
+                    for declared_bound in wb.bounds.iter() {
+                        bounds.push(declared_bound.clone());
+                    }
+                    */
+
+                    let predicate = ast::WhereBoundPredicate {
+                        span: self.span,
+                        bounded_ty: field_ty,
+                        bounds: OwnedSlice::from_vec(bounds),
+                        //OwnedSlice::from_vec(vec![cx.typarambound(trait_path.clone())]),
+                    };
+
+                    let predicate = ast::WherePredicate::BoundPredicate(predicate);
+                    where_clause.predicates.push(predicate);
+                }
+            }
+        }
 
         let trait_generics = Generics {
             lifetimes: lifetimes,
@@ -499,6 +600,10 @@ impl<'a> TraitDef<'a> {
                          struct_def: &StructDef,
                          type_ident: Ident,
                          generics: &Generics) -> P<ast::Item> {
+        let field_tys: Vec<P<ast::Ty>> = struct_def.fields.iter()
+            .map(|field| field.node.ty.clone())
+            .collect();
+
         let methods = self.methods.iter().map(|method_def| {
             let (explicit_self, self_args, nonself_args, tys) =
                 method_def.split_self_nonself_args(
@@ -531,7 +636,7 @@ impl<'a> TraitDef<'a> {
                                      body)
         }).collect();
 
-        self.create_derived_impl(cx, type_ident, generics, methods)
+        self.create_derived_impl(cx, type_ident, generics, field_tys, methods)
     }
 
     fn expand_enum_def(&self,
@@ -539,6 +644,8 @@ impl<'a> TraitDef<'a> {
                        enum_def: &EnumDef,
                        type_ident: Ident,
                        generics: &Generics) -> P<ast::Item> {
+        let field_tys = Vec::new();
+
         let methods = self.methods.iter().map(|method_def| {
             let (explicit_self, self_args, nonself_args, tys) =
                 method_def.split_self_nonself_args(cx, self,
@@ -571,7 +678,7 @@ impl<'a> TraitDef<'a> {
                                      body)
         }).collect();
 
-        self.create_derived_impl(cx, type_ident, generics, methods)
+        self.create_derived_impl(cx, type_ident, generics, field_tys, methods)
     }
 }
 

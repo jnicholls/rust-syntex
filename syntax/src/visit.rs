@@ -132,6 +132,9 @@ pub trait Visitor<'v> : Sized {
     fn visit_path_parameters(&mut self, path_span: Span, path_parameters: &'v PathParameters) {
         walk_path_parameters(self, path_span, path_parameters)
     }
+    fn visit_qpath(&mut self, ty_span: Span, qpath: &'v ast::QPath) {
+        walk_qpath(self, ty_span, qpath)
+    }
     fn visit_assoc_type_binding(&mut self, type_binding: &'v TypeBinding) {
         walk_assoc_type_binding(self, type_binding)
     }
@@ -419,9 +422,7 @@ pub fn walk_ty<'v, V: Visitor<'v>>(visitor: &mut V, typ: &'v Ty) {
             walk_ty_param_bounds_helper(visitor, bounds);
         }
         TyQPath(ref qpath) => {
-            visitor.visit_ty(&*qpath.self_type);
-            visitor.visit_trait_ref(&*qpath.trait_ref);
-            visitor.visit_ident(typ.span, qpath.item_name);
+            walk_qpath(visitor, typ.span, &**qpath);
         }
         TyFixedLengthVec(ref ty, ref expression) => {
             visitor.visit_ty(&**ty);
@@ -481,6 +482,14 @@ pub fn walk_path_parameters<'v, V: Visitor<'v>>(visitor: &mut V,
             }
         }
     }
+}
+
+pub fn walk_qpath<'v, V: Visitor<'v>>(visitor: &mut V,
+                                      span: Span,
+                                      qpath: &'v QPath) {
+    visitor.visit_ty(&*qpath.self_type);
+    visitor.visit_trait_ref(&*qpath.trait_ref);
+    visitor.visit_ident(span, qpath.item_name);
 }
 
 pub fn walk_assoc_type_binding<'v, V: Visitor<'v>>(visitor: &mut V,
