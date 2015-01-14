@@ -478,7 +478,8 @@ impl<'a> TraitDef<'a> {
                     ast::WherePredicate::BoundPredicate(ast::WhereBoundPredicate {
                         span: self.span,
                         bounded_ty: wb.bounded_ty.clone(),
-                        bounds: OwnedSlice::from_vec(bounds),
+                        //bounds: OwnedSlice::from_vec(bounds),
+                        bounds: OwnedSlice::from_vec(wb.bounds.iter().map(|b| b.clone()).collect())
                     })
                 }
                 ast::WherePredicate::RegionPredicate(ref rb) => {
@@ -499,14 +500,12 @@ impl<'a> TraitDef<'a> {
             }
         }));
 
-        /*
         if !ty_params.is_empty() {
             let ty_param_idents: Vec<Ident> = ty_params.iter()
                 .map(|ty_param| ty_param.ident)
                 .collect();
 
             // we need to handle constraining any uses of associated types.
-            /*
             for field_ty in field_tys.into_iter() {
                 if contains_associated_type(&*field_ty, ty_param_idents.as_slice()) {
                     let mut bounds: Vec<_> = self.additional_bounds.iter().map(|p| {
@@ -527,9 +526,7 @@ impl<'a> TraitDef<'a> {
                     where_clause.predicates.push(predicate);
                 }
             }
-            */
         }
-        */
 
         let trait_generics = Generics {
             lifetimes: lifetimes,
@@ -586,12 +583,9 @@ impl<'a> TraitDef<'a> {
                          struct_def: &StructDef,
                          type_ident: Ident,
                          generics: &Generics) -> P<ast::Item> {
-        let field_tys = Vec::new();
-                             /*
         let field_tys: Vec<P<ast::Ty>> = struct_def.fields.iter()
             .map(|field| field.node.ty.clone())
             .collect();
-            */
 
         let methods = self.methods.iter().map(|method_def| {
             let (explicit_self, self_args, nonself_args, tys) =
@@ -635,7 +629,6 @@ impl<'a> TraitDef<'a> {
                        generics: &Generics) -> P<ast::Item> {
         let mut field_tys = Vec::new();
 
-        /*
         for variant in enum_def.variants.iter() {
             match variant.node.kind {
                 ast::VariantKind::TupleVariantKind(ref args) => {
@@ -648,7 +641,6 @@ impl<'a> TraitDef<'a> {
                 }
             }
         }
-        */
 
         let methods = self.methods.iter().map(|method_def| {
             let (explicit_self, self_args, nonself_args, tys) =

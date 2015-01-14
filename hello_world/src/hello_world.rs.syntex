@@ -81,9 +81,7 @@ pub struct Struct<A, B: DeclaredTrait, C> where C: WhereTrait {
     //c1: C::Type,
     //c2: Option<<C as DeclaredTrait>::Type>,
     c3: <C as WhereTrait>::Type,
-    /*
-    c4: Option<<C as DeclaredTrait>::Type>,
-    */
+    c4: Option<<C as WhereTrait>::Type>,
 }
 
 /*
