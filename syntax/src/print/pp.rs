@@ -530,7 +530,6 @@ impl Printer {
         }
     }
     pub fn print_str(&mut self, s: &str) -> io::IoResult<()> {
-        println!("print_str: {}", s);
         while self.pending_indentation > 0 {
             try!(write!(self.out, " "));
             self.pending_indentation -= 1;
@@ -622,6 +621,7 @@ impl Printer {
 //
 // "raw box"
 pub fn rbox(p: &mut Printer, indent: uint, b: Breaks) -> io::IoResult<()> {
+    let thread = ::std::thread::Thread::current();
     p.pretty_print(Token::Begin(BeginToken {
         offset: indent as int,
         breaks: b
