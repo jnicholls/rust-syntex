@@ -1534,17 +1534,17 @@ impl<'a> State<'a> {
                          count: &ast::Expr) -> IoResult<()> {
         try!(self.ibox(indent_unit));
         try!(word(&mut self.s, "["));
-        try!(self.print_expr(&**element));
+        try!(self.print_expr(element));
         try!(self.word_space(";"));
-        try!(self.print_expr(&**count));
+        try!(self.print_expr(count));
         try!(word(&mut self.s, "]"));
         self.end()
     }
 
     fn print_expr_struct(&mut self,
-                         path: &ast::Path.
+                         path: &ast::Path,
                          fields: &[ast::Field],
-                         wth: &Option<P<ast::Expr>) -> IoResult<()> {
+                         wth: &Option<P<ast::Expr>>) -> IoResult<()> {
         try!(self.print_path(path, true));
         if !(fields.is_empty() && wth.is_none()) {
             try!(word(&mut self.s, "{"));
@@ -1624,17 +1624,18 @@ impl<'a> State<'a> {
                         op: ast::UnOp,
                         expr: &ast::Expr) -> IoResult<()> {
         try!(word(&mut self.s, ast_util::unop_to_string(op)));
-        self.print_expr_maybe_paren(&**expr)
+        self.print_expr_maybe_paren(expr)
     }
 
     fn print_expr_addr_of(&mut self,
                           mutability: ast::Mutability,
                           expr: &ast::Expr) -> IoResult<()> {
         try!(word(&mut self.s, "&"));
-        try!(self.print_mutability(m));
+        try!(self.print_mutability(mutability));
         self.print_expr_maybe_paren(expr)
     }
 
+    /*
     pub fn print_expr(&mut self, expr: &ast::Expr) -> IoResult<()> {
         try!(self.maybe_print_comment(expr.span.lo));
         try!(self.ibox(indent_unit));
@@ -1673,6 +1674,353 @@ impl<'a> State<'a> {
             ast::ExprLit(ref lit) => {
                 try!(self.print_literal(&**lit));
             }
+            ast::ExprCast(ref expr, ref ty) => {
+                try!(self.print_expr(&**expr));
+                try!(space(&mut self.s));
+                try!(self.word_space("as"));
+                try!(self.print_type(&**ty));
+            }
+            ast::ExprIf(ref test, ref blk, ref elseopt) => {
+                try!(self.print_if(&**test, &**blk, elseopt.as_ref().map(|e| &**e)));
+            }
+            ast::ExprIfLet(ref pat, ref expr, ref blk, ref elseopt) => {
+                try!(self.print_if_let(&**pat, &**expr, &** blk, elseopt.as_ref().map(|e| &**e)));
+            }
+            ast::ExprWhile(ref test, ref blk, opt_ident) => {
+                for ident in opt_ident.iter() {
+                    try!(self.print_ident(*ident));
+                    try!(self.word_space(":"));
+                }
+                try!(self.head("while"));
+                try!(self.print_expr(&**test));
+                try!(space(&mut self.s));
+                try!(self.print_block(&**blk));
+            }
+            ast::ExprWhileLet(ref pat, ref expr, ref blk, opt_ident) => {
+                for ident in opt_ident.iter() {
+                    try!(self.print_ident(*ident));
+                    try!(self.word_space(":"));
+                }
+                try!(self.head("while let"));
+                try!(self.print_pat(&**pat));
+                try!(space(&mut self.s));
+                try!(self.word_space("="));
+                try!(self.print_expr(&**expr));
+                try!(space(&mut self.s));
+                try!(self.print_block(&**blk));
+            }
+            ast::ExprForLoop(ref pat, ref iter, ref blk, opt_ident) => {
+                for ident in opt_ident.iter() {
+                    try!(self.print_ident(*ident));
+                    try!(self.word_space(":"));
+                }
+                try!(self.head("for"));
+                try!(self.print_pat(&**pat));
+                try!(space(&mut self.s));
+                try!(self.word_space("in"));
+                try!(self.print_expr(&**iter));
+                try!(space(&mut self.s));
+                try!(self.print_block(&**blk));
+            }
+            ast::ExprLoop(ref blk, opt_ident) => {
+                for ident in opt_ident.iter() {
+                    try!(self.print_ident(*ident));
+                    try!(self.word_space(":"));
+                }
+                try!(self.head("loop"));
+                try!(space(&mut self.s));
+                try!(self.print_block(&**blk));
+            }
+            ast::ExprMatch(ref expr, ref arms, _) => {
+                try!(self.cbox(indent_unit));
+                try!(self.ibox(4));
+                try!(self.word_nbsp("match"));
+                try!(self.print_expr(&**expr));
+                try!(space(&mut self.s));
+                try!(self.bopen());
+                for arm in arms.iter() {
+                    try!(self.print_arm(arm));
+                }
+                try!(self.bclose_(expr.span, indent_unit));
+            }
+            ast::ExprClosure(capture_clause, opt_kind, ref decl, ref body) => {
+                try!(self.print_capture_clause(capture_clause));
+
+                try!(self.print_fn_block_args(&**decl, opt_kind));
+                try!(space(&mut self.s));
+
+                if !body.stmts.is_empty() || !body.expr.is_some() {
+                    try!(self.print_block_unclosed(&**body));
+                } else {
+                    // we extract the block, so as not to create another set of boxes
+                    match body.expr.as_ref().unwrap().node {
+                        ast::ExprBlock(ref blk) => {
+                            try!(self.print_block_unclosed(&**blk));
+                        }
+                        _ => {
+                            // this is a bare expression
+                            try!(self.print_expr(body.expr.as_ref().map(|e| &**e).unwrap()));
+                            try!(self.end()); // need to close a box
+                        }
+                    }
+                }
+                // a box will be closed by print_expr, but we didn't want an overall
+                // wrapper so we closed the corresponding opening. so create an
+                // empty box to satisfy the close.
+                try!(self.ibox(0));
+            }
+            ast::ExprBlock(ref blk) => {
+                // containing cbox, will be closed by print-block at }
+                try!(self.cbox(indent_unit));
+                // head-box, will be closed by print-block after {
+                try!(self.ibox(0u));
+                try!(self.print_block(&**blk));
+            }
+            ast::ExprAssign(ref lhs, ref rhs) => {
+                try!(self.print_expr(&**lhs));
+                try!(space(&mut self.s));
+                try!(self.word_space("="));
+                try!(self.print_expr(&**rhs));
+            }
+            ast::ExprAssignOp(op, ref lhs, ref rhs) => {
+                try!(self.print_expr(&**lhs));
+                try!(space(&mut self.s));
+                try!(word(&mut self.s, ast_util::binop_to_string(op)));
+                try!(self.word_space("="));
+                try!(self.print_expr(&**rhs));
+            }
+            ast::ExprField(ref expr, id) => {
+                try!(self.print_expr(&**expr));
+                try!(word(&mut self.s, "."));
+                try!(self.print_ident(id.node));
+            }
+            ast::ExprTupField(ref expr, id) => {
+                try!(self.print_expr(&**expr));
+                try!(word(&mut self.s, "."));
+                try!(self.print_uint(id.node));
+            }
+            ast::ExprIndex(ref expr, ref index) => {
+                try!(self.print_expr(&**expr));
+                try!(word(&mut self.s, "["));
+                try!(self.print_expr(&**index));
+                try!(word(&mut self.s, "]"));
+            }
+            ast::ExprRange(ref start, ref end) => {
+                if let &Some(ref e) = start {
+                    try!(self.print_expr(&**e));
+                }
+                if start.is_some() || end.is_some() {
+                    try!(word(&mut self.s, ".."));
+                }
+                if let &Some(ref e) = end {
+                    try!(self.print_expr(&**e));
+                }
+            }
+            ast::ExprPath(ref path) => try!(self.print_path(path, true)),
+            ast::ExprBreak(opt_ident) => {
+                try!(word(&mut self.s, "break"));
+                try!(space(&mut self.s));
+                for ident in opt_ident.iter() {
+                    try!(self.print_ident(*ident));
+                    try!(space(&mut self.s));
+                }
+            }
+            ast::ExprAgain(opt_ident) => {
+                try!(word(&mut self.s, "continue"));
+                try!(space(&mut self.s));
+                for ident in opt_ident.iter() {
+                    try!(self.print_ident(*ident));
+                    try!(space(&mut self.s))
+                }
+            }
+            ast::ExprRet(ref result) => {
+                try!(word(&mut self.s, "return"));
+                match *result {
+                    Some(ref expr) => {
+                        try!(word(&mut self.s, " "));
+                        try!(self.print_expr(&**expr));
+                    }
+                    _ => ()
+                }
+            }
+            ast::ExprInlineAsm(ref a) => {
+                try!(word(&mut self.s, "asm!"));
+                try!(self.popen());
+                try!(self.print_string(a.asm.get(), a.asm_str_style));
+                try!(self.word_space(":"));
+
+                try!(self.commasep(Inconsistent, &a.outputs[],
+                                   |s, &(ref co, ref o, is_rw)| {
+                    match co.get().slice_shift_char() {
+                        Some(('=', operand)) if is_rw => {
+                            try!(s.print_string(&format!("+{}", operand)[],
+                                                ast::CookedStr))
+                        }
+                        _ => try!(s.print_string(co.get(), ast::CookedStr))
+                    }
+                    try!(s.popen());
+                    try!(s.print_expr(&**o));
+                    try!(s.pclose());
+                    Ok(())
+                }));
+                try!(space(&mut self.s));
+                try!(self.word_space(":"));
+
+                try!(self.commasep(Inconsistent, &a.inputs[],
+                                   |s, &(ref co, ref o)| {
+                    try!(s.print_string(co.get(), ast::CookedStr));
+                    try!(s.popen());
+                    try!(s.print_expr(&**o));
+                    try!(s.pclose());
+                    Ok(())
+                }));
+                try!(space(&mut self.s));
+                try!(self.word_space(":"));
+
+                try!(self.commasep(Inconsistent, &a.clobbers[],
+                                   |s, co| {
+                    try!(s.print_string(co.get(), ast::CookedStr));
+                    Ok(())
+                }));
+
+                let mut options = vec!();
+                if a.volatile {
+                    options.push("volatile");
+                }
+                if a.alignstack {
+                    options.push("alignstack");
+                }
+                if a.dialect == ast::AsmDialect::AsmIntel {
+                    options.push("intel");
+                }
+
+                if options.len() > 0 {
+                    try!(space(&mut self.s));
+                    try!(self.word_space(":"));
+                    try!(self.commasep(Inconsistent, &*options,
+                                       |s, &co| {
+                        try!(s.print_string(co, ast::CookedStr));
+                        Ok(())
+                    }));
+                }
+
+                try!(self.pclose());
+            }
+            ast::ExprMac(ref m) => try!(self.print_mac(m, token::Paren)),
+            ast::ExprParen(ref e) => {
+                try!(self.popen());
+                try!(self.print_expr(&**e));
+                try!(self.pclose());
+            }
+        }
+        try!(self.ann.post(self, NodeExpr(expr)));
+        self.end()
+    }
+        */
+
+    pub fn print_expr(&mut self, expr: &ast::Expr) -> IoResult<()> {
+        try!(self.maybe_print_comment(expr.span.lo));
+        try!(self.ibox(indent_unit));
+        try!(self.ann.pre(self, NodeExpr(expr)));
+        match expr.node {
+            ast::ExprBox(ref p, ref e) => {
+                try!(word(&mut self.s, "box"));
+                try!(word(&mut self.s, "("));
+                try!(p.as_ref().map_or(Ok(()), |e|self.print_expr(&**e)));
+                try!(self.word_space(")"));
+                try!(self.print_expr(&**e));
+            }
+            ast::ExprVec(ref exprs) => {
+                try!(self.ibox(indent_unit));
+                try!(word(&mut self.s, "["));
+                try!(self.commasep_exprs(Inconsistent, &exprs[]));
+                try!(word(&mut self.s, "]"));
+                try!(self.end());
+            }
+
+            ast::ExprRepeat(ref element, ref count) => {
+                try!(self.ibox(indent_unit));
+                try!(word(&mut self.s, "["));
+                try!(self.print_expr(&**element));
+                try!(self.word_space(";"));
+                try!(self.print_expr(&**count));
+                try!(word(&mut self.s, "]"));
+                try!(self.end());
+            }
+
+            ast::ExprStruct(ref path, ref fields, ref wth) => {
+                try!(self.print_path(path, true));
+                if !(fields.is_empty() && wth.is_none()) {
+                    try!(word(&mut self.s, "{"));
+                    try!(self.commasep_cmnt(
+                        Consistent,
+                        &fields[],
+                        |s, field| {
+                            try!(s.ibox(indent_unit));
+                            try!(s.print_ident(field.ident.node));
+                            try!(s.word_space(":"));
+                            try!(s.print_expr(&*field.expr));
+                            s.end()
+                        },
+                        |f| f.span));
+                    match *wth {
+                        Some(ref expr) => {
+                            try!(self.ibox(indent_unit));
+                            if !fields.is_empty() {
+                                try!(word(&mut self.s, ","));
+                                try!(space(&mut self.s));
+                            }
+                            try!(word(&mut self.s, ".."));
+                            try!(self.print_expr(&**expr));
+                            try!(self.end());
+                        }
+                        _ => try!(word(&mut self.s, ",")),
+                    }
+                    try!(word(&mut self.s, "}"));
+                }
+            }
+            ast::ExprTup(ref exprs) => {
+                try!(self.popen());
+                try!(self.commasep_exprs(Inconsistent, &exprs[]));
+                if exprs.len() == 1 {
+                    try!(word(&mut self.s, ","));
+                }
+                try!(self.pclose());
+            }
+            ast::ExprCall(ref func, ref args) => {
+                try!(self.print_expr_maybe_paren(&**func));
+                try!(self.print_call_post(&args[]));
+            }
+            ast::ExprMethodCall(ident, ref tys, ref args) => {
+                //try!(self.print_expr_method_call(ident, &tys[], &args[]));
+                let base_args = args.slice_from(1);
+                try!(self.print_expr(&*args[0]));
+                try!(word(&mut self.s, "."));
+                try!(self.print_ident(ident.node));
+                if tys.len() > 0u {
+                    try!(word(&mut self.s, "::<"));
+                    try!(self.commasep(Inconsistent, &tys[],
+                                       |s, ty| s.print_type(&**ty)));
+                    try!(word(&mut self.s, ">"));
+                }
+                try!(self.print_call_post(base_args));
+            }
+            ast::ExprBinary(op, ref lhs, ref rhs) => {
+                try!(self.print_expr(&**lhs));
+                try!(space(&mut self.s));
+                try!(self.word_space(ast_util::binop_to_string(op)));
+                try!(self.print_expr(&**rhs));
+            }
+            ast::ExprUnary(op, ref expr) => {
+                try!(word(&mut self.s, ast_util::unop_to_string(op)));
+                try!(self.print_expr_maybe_paren(&**expr));
+            }
+            ast::ExprAddrOf(m, ref expr) => {
+                try!(word(&mut self.s, "&"));
+                try!(self.print_mutability(m));
+                try!(self.print_expr_maybe_paren(&**expr));
+            }
+            ast::ExprLit(ref lit) => try!(self.print_literal(&**lit)),
             ast::ExprCast(ref expr, ref ty) => {
                 try!(self.print_expr(&**expr));
                 try!(space(&mut self.s));
